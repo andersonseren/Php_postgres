@@ -1,120 +1,220 @@
 <?php
-// index.php - Versión ultra simplificada para Render
+// index.php - Sistema completo de registro de estudiantes
+// Versión optimizada para Render.com
 
-// Forzar mostrar errores
-ini_set('display_errors', 1);
-error_reporting(E_ALL);
+// ===== CONFIGURACIÓN DE BASE DE DATOS =====
+$database_url = getenv('DATABASE_URL');
 
+// Variable para mensajes
 $mensaje = '';
+$tipo_mensaje = '';
 $conexion_exitosa = false;
 $estudiantes = [];
 
-// Conexión a PostgreSQL
-$database_url = getenv('DATABASE_URL');
-
 if ($database_url) {
+    // Estamos en RENDER.COM
     $db = parse_url($database_url);
     $host = $db['host'];
     $port = $db['port'] ?? '5432';
     $dbname = ltrim($db['path'], '/');
     $user = $db['user'];
     $password = $db['pass'];
+    $entorno = "render";
     
-    try {
-        $pdo = new PDO(
-            "pgsql:host=$host;port=$port;dbname=$dbname;sslmode=require",
-            $user,
-            $password,
-            [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
-        );
-        $conexion_exitosa = true;
-        $mensaje = "✅ Conexión exitosa a PostgreSQL";
-    } catch (PDOException $e) {
-        $mensaje = "❌ Error: " . $e->getMessage();
-    }
+    // Forzar SSL para Render
+    $ssl_mode = "sslmode=require";
 } else {
-    $mensaje = "❌ DATABASE_URL no está configurada";
+    // Estamos en LOCALHOST (para pruebas)
+    $host = 'localhost';
+    $port = '5432';
+    $dbname = 'escuela';
+    $user = 'postgres';
+    $password = '1234';
+    $entorno = "local";
+    $ssl_mode = "";
 }
 
-// Procesar formulario
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && $conexion_exitosa) {
-    $nombre = $_POST['nombre'] ?? '';
-    $apellido = $_POST['apellido'] ?? '';
-    $email = $_POST['email'] ?? '';
+// Intentar conectar a PostgreSQL
+try {
+    $dsn = "pgsql:host=$host;port=$port;dbname=$dbname;$ssl_mode";
+    $pdo = new PDO($dsn, $user, $password, [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        PDO::ATTR_TIMEOUT => 30
+    ]);
+    $conexion_exitosa = true;
     
-    try {
-        $stmt = $pdo->prepare("INSERT INTO estudiantes (nombre, apellido, email) VALUES (?, ?, ?)");
-        $stmt->execute([$nombre, $apellido, $email]);
-        $mensaje = "✅ Estudiante registrado";
-    } catch (Exception $e) {
-        $mensaje = "❌ Error: " . $e->getMessage();
+    // Probar la conexión con una consulta simple
+    $pdo->query("SELECT 1");
+    
+} catch (PDOException $e) {
+    $conexion_exitosa = false;
+    $mensaje = "❌ Error de conexión: " . $e->getMessage();
+    $tipo_mensaje = "danger";
+}
+
+// Procesar el formulario
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $conexion_exitosa) {
+    $nombre = trim($_POST['nombre'] ?? '');
+    $apellido = trim($_POST['apellido'] ?? '');
+    $email = trim($_POST['email'] ?? '');
+    $telefono = !empty($_POST['telefono']) ? trim($_POST['telefono']) : null;
+    $fecha_nacimiento = !empty($_POST['fecha_nacimiento']) ? $_POST['fecha_nacimiento'] : null;
+    
+    $errores = [];
+    if (empty($nombre)) $errores[] = "Nombre obligatorio";
+    if (empty($apellido)) $errores[] = "Apellido obligatorio";
+    if (empty($email)) $errores[] = "Email obligatorio";
+    elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) $errores[] = "Email inválido";
+    
+    if (empty($errores)) {
+        try {
+            $sql = "INSERT INTO estudiantes (nombre, apellido, email, telefono, fecha_nacimiento) 
+                    VALUES (:nombre, :apellido, :email, :telefono, :fecha_nacimiento)";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([
+                ':nombre' => $nombre,
+                ':apellido' => $apellido,
+                ':email' => $email,
+                ':telefono' => $telefono,
+                ':fecha_nacimiento' => $fecha_nacimiento
+            ]);
+            $mensaje = "✅ Estudiante $nombre $apellido registrado exitosamente";
+            $tipo_mensaje = "success";
+        } catch (PDOException $e) {
+            if (strpos($e->getMessage(), 'unique constraint') !== false) {
+                $mensaje = "❌ El email '$email' ya está registrado";
+            } else {
+                $mensaje = "❌ Error: " . $e->getMessage();
+            }
+            $tipo_mensaje = "danger";
+        }
+    } else {
+        $mensaje = "❌ " . implode(', ', $errores);
+        $tipo_mensaje = "danger";
     }
 }
 
-// Obtener listado
+// Consultar listado
 if ($conexion_exitosa) {
     try {
-        $estudiantes = $pdo->query("SELECT id, nombre, apellido, email FROM estudiantes ORDER BY id DESC")->fetchAll();
-    } catch (Exception $e) {
-        $estudiantes = [];
+        $sql = "SELECT id, nombre, apellido, email, telefono, 
+                       TO_CHAR(fecha_nacimiento, 'DD/MM/YYYY') as fecha_nac,
+                       TO_CHAR(fecha_registro, 'DD/MM/YYYY HH24:MI') as fecha_reg
+                FROM estudiantes 
+                ORDER BY id DESC";
+        $estudiantes = $pdo->query($sql)->fetchAll();
+    } catch (PDOException $e) {
+        if (strpos($e->getMessage(), 'does not exist') !== false) {
+            $mensaje = "⚠️ La tabla 'estudiantes' no existe. Ejecuta el CREATE TABLE en DBeaver.";
+            $tipo_mensaje = "warning";
+        }
     }
 }
 ?>
+
 <!DOCTYPE html>
-<html>
+<html lang="es">
 <head>
-    <title>Estudiantes</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Estudiantes</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
-<body class="container mt-4">
-    <div class="card">
-        <div class="card-header bg-primary text-white">
-            <h3>📚 Sistema de Estudiantes</h3>
-        </div>
-        <div class="card-body">
-            <!-- Mensaje de estado -->
-            <div class="alert alert-<?php echo $conexion_exitosa ? 'success' : 'danger'; ?>">
-                <?php echo $mensaje; ?>
-                <?php if (!$conexion_exitosa && $database_url): ?>
-                    <br><small>Verifica que la tabla 'estudiantes' exista en la BD</small>
-                <?php endif; ?>
-            </div>
-
-            <!-- Formulario -->
-            <form method="POST" class="mb-4">
-                <div class="row">
-                    <div class="col-md-4">
-                        <input type="text" name="nombre" class="form-control" placeholder="Nombre" required>
-                    </div>
-                    <div class="col-md-4">
-                        <input type="text" name="apellido" class="form-control" placeholder="Apellido" required>
-                    </div>
-                    <div class="col-md-4">
-                        <div class="input-group">
-                            <input type="email" name="email" class="form-control" placeholder="Email" required>
-                            <button type="submit" class="btn btn-primary">Guardar</button>
-                        </div>
-                    </div>
-                </div>
-            </form>
-
-            <!-- Listado -->
-            <h4>Listado de Estudiantes</h4>
-            <?php if (count($estudiantes) > 0): ?>
-                <table class="table table-bordered">
-                    <thead>
-                        <tr><th>ID</th><th>Nombre</th><th>Email</th></tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($estudiantes as $e): ?>
-                        <tr><td><?php echo $e['id']; ?></td><td><?php echo $e['nombre'] . ' ' . $e['apellido']; ?></td><td><?php echo $e['email']; ?></td></tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
+<body class="bg-light">
+    <div class="container mt-4">
+        <div class="text-center mb-4">
+            <h1 class="display-5">📚 Sistema de Gestión de Estudiantes</h1>
+            <p class="lead">Registro y consulta de estudiantes</p>
+            <?php if ($conexion_exitosa): ?>
+                <span class="badge bg-success">✅ Conectado a PostgreSQL en Render</span>
             <?php else: ?>
-                <p>No hay estudiantes registrados</p>
+                <span class="badge bg-danger">❌ Sin conexión a PostgreSQL</span>
             <?php endif; ?>
         </div>
+
+        <?php if ($mensaje): ?>
+            <div class="alert alert-<?php echo $tipo_mensaje; ?> alert-dismissible fade show" role="alert">
+                <?php echo $mensaje; ?>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        <?php endif; ?>
+
+        <div class="row">
+            <!-- Formulario -->
+            <div class="col-md-5">
+                <div class="card shadow">
+                    <div class="card-header bg-primary text-white">
+                        <h4 class="mb-0">➕ Registrar Estudiante</h4>
+                    </div>
+                    <div class="card-body">
+                        <form method="POST">
+                            <div class="mb-3">
+                                <label class="form-label">Nombre *</label>
+                                <input type="text" name="nombre" class="form-control" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Apellido *</label>
+                                <input type="text" name="apellido" class="form-control" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Email *</label>
+                                <input type="email" name="email" class="form-control" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Teléfono</label>
+                                <input type="text" name="telefono" class="form-control">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Fecha Nacimiento</label>
+                                <input type="date" name="fecha_nacimiento" class="form-control">
+                            </div>
+                            <button type="submit" class="btn btn-primary w-100">💾 Guardar</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Listado -->
+            <div class="col-md-7">
+                <div class="card shadow">
+                    <div class="card-header bg-success text-white">
+                        <h4 class="mb-0">📋 Listado de Estudiantes</h4>
+                    </div>
+                    <div class="card-body">
+                        <?php if (!$conexion_exitosa): ?>
+                            <div class="alert alert-warning">
+                                <strong>⚠️ No hay conexión a la base de datos.</strong><br>
+                                Verifica que la variable DATABASE_URL esté configurada en Render.
+                            </div>
+                        <?php elseif (count($estudiantes) > 0): ?>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-hover">
+                                    <thead class="table-dark">
+                                        <tr><th>ID</th><th>Nombre</th><th>Email</th><th>Teléfono</th><th>Registro</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($estudiantes as $e): ?>
+                                        <tr>
+                                            <td><?php echo $e['id']; ?></td>
+                                            <td><?php echo htmlspecialchars($e['nombre'] . ' ' . $e['apellido']); ?></td>
+                                            <td><?php echo htmlspecialchars($e['email']); ?></td>
+                                            <td><?php echo $e['telefono'] ?: '—'; ?></td>
+                                            <td><small><?php echo $e['fecha_reg']; ?></small></td>
+                                        </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="mt-2">Total: <strong><?php echo count($estudiantes); ?></strong></div>
+                        <?php else: ?>
+                            <div class="alert alert-info">ℹ️ No hay estudiantes. ¡Registra el primero!</div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
