@@ -25,10 +25,13 @@ if ($database_url) {
 $mensaje = '';
 $tipo_mensaje = '';
 
-// Intentar conectar a PostgreSQL
+// ========== PARTE CORREGIDA: Agregar SSL para Render ==========
 try {
+    // Agregar SSL solo si estamos en Render
+    $ssl_mode = ($entorno == "render") ? "sslmode=require" : "";
+    
     $pdo = new PDO(
-        "pgsql:host=$host;port=$port;dbname=$dbname",
+        "pgsql:host=$host;port=$port;dbname=$dbname;$ssl_mode",
         $user,
         $password,
         [
@@ -43,6 +46,7 @@ try {
     $mensaje = "❌ Error de conexión a PostgreSQL: " . $e->getMessage();
     $tipo_mensaje = "danger";
 }
+// ========== FIN DE LA CORRECCIÓN ==========
 
 // Procesar el formulario cuando se envía
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $conexion_exitosa) {
