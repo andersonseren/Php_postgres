@@ -1,0 +1,85 @@
+<?php
+// listado_estudiantes.php - Muestra todos los estudiantes registrados
+
+require_once 'config.php';
+
+// Consultar todos los estudiantes
+try {
+    $sql = "SELECT id, nombre, apellido, email, telefono, 
+                   TO_CHAR(fecha_nacimiento, 'DD/MM/YYYY') as fecha_nacimiento,
+                   TO_CHAR(fecha_registro, 'DD/MM/YYYY HH24:MI') as fecha_registro
+            FROM estudiantes 
+            ORDER BY id DESC";
+    
+    $result = $pdo->query($sql);
+    $estudiantes = $result->fetchAll();
+} catch (PDOException $e) {
+    $error = "Error al consultar: " . $e->getMessage();
+    $estudiantes = [];
+}
+?>
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Listado de Estudiantes</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+    <div class="container mt-5">
+        <div class="card shadow">
+            <div class="card-header bg-success text-white">
+                <h3 class="text-center mb-0">📋 Listado de Estudiantes</h3>
+            </div>
+            <div class="card-body">
+                <?php if(isset($_GET['mensaje'])): ?>
+                    <div class="alert alert-info"><?php echo htmlspecialchars($_GET['mensaje']); ?></div>
+                <?php endif; ?>
+
+                <?php if (!empty($estudiantes)): ?>
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Nombre Completo</th>
+                                    <th>Email</th>
+                                    <th>Teléfono</th>
+                                    <th>Fecha Nac.</th>
+                                    <th>Registro</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($estudiantes as $e): ?>
+                                <tr>
+                                    <td><?php echo $e['id']; ?></td>
+                                    <td><?php echo htmlspecialchars($e['nombre'] . ' ' . $e['apellido']); ?></td>
+                                    <td><?php echo htmlspecialchars($e['email']); ?></td>
+                                    <td><?php echo $e['telefono'] ?: '—'; ?></td>
+                                    <td><?php echo $e['fecha_nacimiento'] ?: '—'; ?></td>
+                                    <td><?php echo $e['fecha_registro']; ?></td>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="alert alert-info">
+                        Total de estudiantes: <strong><?php echo count($estudiantes); ?></strong>
+                    </div>
+                <?php else: ?>
+                    <div class="alert alert-warning">
+                        ℹ️ No hay estudiantes registrados aún.
+                        <a href="index.html" class="alert-link">Registra el primer estudiante</a>
+                    </div>
+                <?php endif; ?>
+                
+                <div class="text-center mt-3">
+                    <a href="index.html" class="btn btn-primary">➕ Registrar Nuevo Estudiante</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
